@@ -97,8 +97,10 @@ public class BookingService {
             throw new RuntimeException("Thời lượng tối thiểu là 30 phút");
         }
         LocalDateTime bookingStart = LocalDateTime.parse(bookingTime);
-        if (bookingStart.isBefore(LocalDateTime.now().plusHours(2))) {
-            throw new RuntimeException("Bạn phải đặt lịch trước ít nhất 2 giờ");
+        // Không còn chặn đặt lịch trước 2 giờ.
+        // Vẫn chặn các booking rơi vào quá khứ để tránh lỗi nghiệp vụ.
+        if (bookingStart.isBefore(LocalDateTime.now())) {
+            throw new RuntimeException("Bạn phải đặt lịch trong tương lai");
         }
 
         boolean customerHasActiveBooking = bookingRepository.findByCustomerIdOrderByBookingTimeDesc(customerId)
@@ -200,11 +202,6 @@ public class BookingService {
         }
     }
 
-    private LocalDateTime bookingEndTime(Booking booking) {
-        int duration = booking.getDuration() == null ? 0 : booking.getDuration();
-        return booking.getBookingTime().plusMinutes(duration);
-    }
-
     private static LocalDateTime now() {
         return LocalDateTime.now();
     }
@@ -287,9 +284,6 @@ public class BookingService {
         if (booking.getStatus() != Booking.Status.IN_PROGRESS) {
             throw new RuntimeException("Đơn phải ở trạng thái IN_PROGRESS trước khi check-out");
         }
-        if (now().isBefore(bookingEndTime(booking))) {
-            throw new RuntimeException("Chưa tới giờ hết hạn để check-out. Vui lòng chờ hết thời gian booking.");
-        }
         if (booking.getCustomerCheckOutLatitude() != null) {
             throw new RuntimeException("Bạn đã gửi check-out GPS cho đơn này");
         }
@@ -316,9 +310,6 @@ public class BookingService {
         }
         if (booking.getStatus() != Booking.Status.IN_PROGRESS) {
             throw new RuntimeException("Đơn không ở trạng thái IN_PROGRESS");
-        }
-        if (now().isBefore(bookingEndTime(booking))) {
-            throw new RuntimeException("Chưa tới giờ hết hạn để check-out. Vui lòng chờ hết thời gian booking.");
         }
         if (booking.getCompanionCheckOutLatitude() != null) {
             throw new RuntimeException("Bạn đã gửi check-out GPS cho đơn này");

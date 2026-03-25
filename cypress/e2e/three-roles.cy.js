@@ -64,9 +64,9 @@ describe('Nghiệp vụ E2E chi tiết cho 3 role', () => {
         method: 'POST',
         url: '/api/companions/me/service-prices',
         body: {
-          serviceName: 'Dịch vụ E2E',
+          serviceName: 'Gói đồng hành cuối tuần',
           pricePerHour: '200000',
-          description: 'Gói test tự động',
+          description: 'Tư vấn vui vẻ, đồng hành theo nhu cầu (demo)',
         },
       }).then((createResp) => {
         state.servicePriceId = createResp.body.id;
@@ -84,9 +84,9 @@ describe('Nghiệp vụ E2E chi tiết cho 3 role', () => {
       method: 'POST',
       url: '/api/companions/register',
       body: {
-        bio: 'Companion E2E',
-        hobbies: 'Đọc sách',
-        appearance: 'Lịch sự',
+        bio: 'Bạn đồng hành vui vẻ, trò chuyện nhẹ nhàng và lịch sự',
+        hobbies: 'Cà phê, đọc sách, dạo phố',
+        appearance: 'Tinh tế, lịch sự',
         availability: 'Tối thứ 2-6',
         serviceType: 'Tâm sự',
         area: 'Quận 1',
@@ -148,7 +148,7 @@ describe('Nghiệp vụ E2E chi tiết cho 3 role', () => {
     cy.get('#duration').clear().type('60');
     cy.get('#locationEnabled').uncheck({ force: true });
     cy.get('#rentalVenue').select('Quán cafe trung tâm');
-    cy.get('#note').clear().type('Booking từ Cypress - 3 role');
+    cy.get('#note').clear().type('Booking demo: test luồng 3 role');
     cy.get('#booking-form').submit();
     cy.wait('@createBookingApi').its('response.statusCode').should('eq', 200);
     cy.url().should('include', '/user/appointments.html');
@@ -258,7 +258,7 @@ describe('Nghiệp vụ E2E chi tiết cho 3 role', () => {
     cy.visit('/companion/finance.html');
     cy.get('#bank-name').clear().type('Vietcombank');
     cy.get('#bank-account-number').clear().type('123456789');
-    cy.get('#account-holder-name').clear().type('E2E TEST');
+    cy.get('#account-holder-name').clear().type('Nguyễn Văn A (Demo)');
     cy.get('#bank-account-form').submit();
     cy.wait('@saveBankApi').its('response.statusCode').should('eq', 200);
     cy.get('#alert-box').invoke('text').should('match', /lưu|ngân hàng/i);
@@ -375,9 +375,9 @@ describe('Nghiệp vụ E2E chi tiết cho 3 role', () => {
 
     cy.then(() => {
       cy.visit(`/user/chat.html?bookingId=${state.completedBookingId}`);
-      cy.get('#chat-content').clear().type('Xin chào companion từ test E2E');
+      cy.get('#chat-content').clear().type('Chào bạn, mình tới đúng hẹn nhé!');
       cy.get('#chat-form').submit();
-      cy.get('#chat-list').should('contain.text', 'Xin chào companion từ test E2E');
+      cy.get('#chat-list').should('contain.text', 'Chào bạn, mình tới đúng hẹn nhé!');
       cy.get('#call-btn').click();
       cy.get('#call-info').should('contain.text', 'VoIP room');
     });

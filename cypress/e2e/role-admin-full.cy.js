@@ -1,6 +1,6 @@
 describe('ADMIN full flow: UI to API', () => {
   const admin = {
-    username: Cypress.env('ADMIN_USERNAME') || 'thinh270924@gmail.com',
+    username: Cypress.env('ADMIN_USERNAME') || 'admin',
     password: Cypress.env('ADMIN_PASSWORD') || '123456',
   };
 

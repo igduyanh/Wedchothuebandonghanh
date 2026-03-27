@@ -227,9 +227,12 @@ public class BookingService {
         booking.setCancelledAt(LocalDateTime.now());
         Booking saved = bookingRepository.save(booking);
 
-        // Check how many times cancelled in the last 1 month
+        // Lấy thời điểm bắt đầu đếm (1 tháng trước HOẶC thời điểm reset lỗi cuối cùng)
         LocalDateTime oneMonthAgo = LocalDateTime.now().minusMonths(1);
-        long cancelCount = bookingRepository.countByCustomerIdAndStatusAndCancelledAtAfter(customerId, Booking.Status.CANCELLED, oneMonthAgo);
+        LocalDateTime resetAt = booking.getCustomer().getLastCancellationResetAt();
+        LocalDateTime threshold = (resetAt != null && resetAt.isAfter(oneMonthAgo)) ? resetAt : oneMonthAgo;
+
+        long cancelCount = bookingRepository.countByCustomerIdAndStatusAndCancelledAtAfter(customerId, Booking.Status.CANCELLED, threshold);
         
         if (cancelCount >= 3) {
             User customer = booking.getCustomer();

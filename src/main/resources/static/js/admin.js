@@ -549,7 +549,19 @@ async function loadUsersPage(keyword) {
     if (!usersBody || !companionsBody) return;
     const k = keyword !== undefined && keyword !== null ? String(keyword).trim() : getPageSearchKeyword();
     const q = k ? `?keyword=${encodeURIComponent(k)}` : "";
-    const data = await requestJson(`/api/admin/users${q}`);
+    
+    let data, pendingAppeals = [];
+    try {
+        const [usersRes, appealsRes] = await Promise.all([
+            requestJson(`/api/admin/users${q}`),
+            requestJson("/api/admin/appeals/pending").catch(() => [])
+        ]);
+        data = usersRes;
+        pendingAppeals = appealsRes || [];
+    } catch (e) {
+        throw e;
+    }
+    
     usersBody.innerHTML = "";
     companionsBody.innerHTML = "";
 
@@ -557,18 +569,35 @@ async function loadUsersPage(keyword) {
         renderEmptyRow(usersBody, 6, "Không có tài khoản phù hợp.");
     }
     data.users.forEach((user) => {
+        const appeal = pendingAppeals.find(a => a.user?.id === user.id);
+        const badgeClass = user.flag === "BANNED" ? "text-bg-danger" 
+                         : user.flag === "WARNED" ? "text-bg-warning" 
+                         : user.flag === "LOCKED" ? "text-bg-secondary" 
+                         : "text-bg-success";
+        const badgeText = user.flag === "BANNED" ? "Khóa vi phạm" 
+                        : user.flag === "WARNED" ? "Đã cảnh cáo" 
+                        : user.flag === "LOCKED" ? "Khóa tạm thời" 
+                        : "Bình thường";
+        
         const tr = document.createElement("tr");
         tr.innerHTML = `
             <td>${user.id}</td>
             <td>${escapeHtml(user.username)}</td>
             <td>${escapeHtml(user.email)}</td>
             <td>${escapeHtml(user.role)}</td>
-            <td><span class="badge ${user.flag === "BANNED" ? "text-bg-danger" : user.flag === "WARNED" ? "text-bg-warning" : "text-bg-secondary"}">${escapeHtml(user.flag === "BANNED" ? "Đã khóa" : user.flag === "WARNED" ? "Đã cảnh cáo" : "Bình thường")}</span></td>
+            <td><span class="badge ${badgeClass}">${escapeHtml(badgeText)}</span></td>
             <td class="user-actions-cell"></td>
         `;
         const actionsCell = tr.querySelector(".user-actions-cell");
         if (actionsCell) {
             actionsCell.appendChild(buildUserActionButtons(user.id));
+            if (appeal) {
+                const appealBtn = document.createElement("button");
+                appealBtn.className = "btn btn-sm btn-info ms-1 text-white";
+                appealBtn.innerHTML = '<i class="bi bi-eye me-1"></i>Xem khiếu nại';
+                appealBtn.onclick = () => openAppealReviewModal(appeal);
+                actionsCell.appendChild(appealBtn);
+            }
         }
         usersBody.appendChild(tr);
     });
@@ -597,6 +626,50 @@ async function loadUsersPage(keyword) {
     usersBody.querySelectorAll('button[data-action="reset-status"]').forEach((btn) => {
         btn.addEventListener("click", () => updateUserFlag(btn.dataset.id, "reset-status"));
     });
+}
+
+function openAppealReviewModal(appeal) {
+    const detailBox = document.getElementById("appeal-review-detail");
+    if (!detailBox) return;
+    
+    const user = appeal.user || {};
+    detailBox.innerHTML = `
+        <div class="row g-2">
+            <div class="col-12"><strong>Người dùng:</strong> ${escapeHtml(user.username)} (ID: ${user.id})</div>
+            <div class="col-12 mt-2"><strong>Nội dung khiếu nại:</strong></div>
+            <div class="col-12"><div class="p-3 bg-light border rounded text-dark" style="white-space: pre-wrap;">${escapeHtml(appeal.reason)}</div></div>
+            <div class="col-12 mt-2"><small class="text-muted">Gửi lúc: ${escapeHtml(formatDateTime(appeal.createdAt))}</small></div>
+        </div>
+    `;
+    
+    const approveBtn = document.getElementById("appeal-approve-btn");
+    const rejectBtn = document.getElementById("appeal-reject-btn");
+    
+    if (approveBtn) {
+        approveBtn.onclick = async () => {
+            await requestJson(`/api/admin/appeals/${appeal.id}/resolve`, {
+                method: "POST",
+                body: JSON.stringify({ approve: true })
+            });
+            showAlert("Đã duyệt khiếu nại và mở khóa cho tài khoản " + user.username);
+            bootstrap.Modal.getInstance(document.getElementById("appeal-review-modal"))?.hide();
+            await loadUsersPage();
+        };
+    }
+    
+    if (rejectBtn) {
+        rejectBtn.onclick = async () => {
+            await requestJson(`/api/admin/appeals/${appeal.id}/resolve`, {
+                method: "POST",
+                body: JSON.stringify({ approve: false })
+            });
+            showAlert("Đã từ chối khiếu nại của " + user.username);
+            bootstrap.Modal.getInstance(document.getElementById("appeal-review-modal"))?.hide();
+            await loadUsersPage();
+        };
+    }
+    
+    new bootstrap.Modal(document.getElementById("appeal-review-modal")).show();
 }
 
 async function updateUserFlag(userId, action) {

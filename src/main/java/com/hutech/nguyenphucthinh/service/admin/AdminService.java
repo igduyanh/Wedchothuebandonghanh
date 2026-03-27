@@ -184,6 +184,8 @@ public class AdminService {
         User user = userRepository.findById(userId).orElseThrow();
         user.setModerationFlag(User.ModerationFlag.NONE);
         user.setLocked(false);
+        user.setLockedUntil(null);
+        user.setLastCancellationResetAt(java.time.LocalDateTime.now());
         userRepository.save(user);
         return Map.of("message", "Đã khôi phục trạng thái bình thường", "userId", userId, "flag", "NONE");
     }
@@ -211,6 +213,7 @@ public class AdminService {
         User user = userRepository.findById(userId).orElseThrow();
         user.setLocked(false);
         user.setLockedUntil(null);
+        user.setLastCancellationResetAt(java.time.LocalDateTime.now());
         userRepository.save(user);
         return Map.of("message", "Đã mở khóa tài khoản", "userId", userId);
     }

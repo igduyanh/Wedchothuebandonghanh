@@ -47,6 +47,9 @@ public class User {
     private Boolean locked = false;
 
     private LocalDateTime lockedUntil;
+    
+    @Column(name = "last_cancellation_reset_at")
+    private LocalDateTime lastCancellationResetAt;
 
     private LocalDateTime createdAt = LocalDateTime.now();
 

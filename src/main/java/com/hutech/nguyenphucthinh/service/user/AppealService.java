@@ -44,7 +44,10 @@ public class AppealService {
 
     @Transactional
     public Appeal submitAppeal(User user, String reason) {
-        if (!Boolean.TRUE.equals(user.getLocked())) {
+        boolean isLocked = Boolean.TRUE.equals(user.getLocked());
+        boolean isBanned = User.ModerationFlag.BANNED.equals(user.getModerationFlag());
+        
+        if (!isLocked && !isBanned) {
             throw new RuntimeException("Tài khoản của bạn không bị khóa, không thể khiếu nại.");
         }
         if (reason == null || reason.trim().isEmpty()) {
@@ -85,6 +88,7 @@ public class AppealService {
             User user = appeal.getUser();
             user.setLocked(false);
             user.setLockedUntil(null);
+            user.setLastCancellationResetAt(LocalDateTime.now());
             userRepository.save(user);
 
             notificationService.create(

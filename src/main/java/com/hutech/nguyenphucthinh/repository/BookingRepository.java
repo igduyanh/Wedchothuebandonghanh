@@ -13,4 +13,6 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
     long countByCompanionIdAndStatus(Long companionId, Booking.Status status);
 
     List<Booking> findByStatusInOrderByBookingTimeDesc(Collection<Booking.Status> statuses);
+
+    long countByCustomerIdAndStatusAndCancelledAtAfter(Long customerId, Booking.Status status, java.time.LocalDateTime time);
 }

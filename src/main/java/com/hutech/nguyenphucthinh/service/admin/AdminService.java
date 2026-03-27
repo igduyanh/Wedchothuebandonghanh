@@ -107,7 +107,14 @@ public class AdminService {
             item.put("email", user.getEmail());
             item.put("role", user.getRole());
             item.put("fullName", user.getFullName());
-            item.put("flag", user.getModerationFlag() == null ? "NONE" : user.getModerationFlag().name());
+            item.put("locked", user.getLocked());
+            item.put("lockedUntil", user.getLockedUntil());
+            
+            String flagName = user.getModerationFlag() == null ? "NONE" : user.getModerationFlag().name();
+            if (Boolean.TRUE.equals(user.getLocked()) && "NONE".equals(flagName)) {
+                flagName = "LOCKED";
+            }
+            item.put("flag", flagName);
             users.add(item);
         }
 
@@ -119,12 +126,21 @@ public class AdminService {
             item.put("username", companion.getUser() != null ? companion.getUser().getUsername() : "");
             item.put("status", companion.getStatus());
             item.put("bio", companion.getBio());
-            item.put(
-                    "flag",
-                    companion.getUser() == null || companion.getUser().getModerationFlag() == null
-                            ? "NONE"
-                            : companion.getUser().getModerationFlag().name()
-            );
+            
+            String flagName = "NONE";
+            boolean isLocked = false;
+            Object lockedUntil = null;
+            if (companion.getUser() != null) {
+                isLocked = Boolean.TRUE.equals(companion.getUser().getLocked());
+                lockedUntil = companion.getUser().getLockedUntil();
+                flagName = companion.getUser().getModerationFlag() == null ? "NONE" : companion.getUser().getModerationFlag().name();
+                if (isLocked && "NONE".equals(flagName)) {
+                    flagName = "LOCKED";
+                }
+            }
+            item.put("flag", flagName);
+            item.put("locked", isLocked);
+            item.put("lockedUntil", lockedUntil);
             companions.add(item);
         }
 
@@ -170,6 +186,33 @@ public class AdminService {
         user.setLocked(false);
         userRepository.save(user);
         return Map.of("message", "Đã khôi phục trạng thái bình thường", "userId", userId, "flag", "NONE");
+    }
+
+    @Autowired
+    private com.hutech.nguyenphucthinh.service.user.AppealService appealService;
+
+    public List<Map<String, Object>> getPendingAppeals() {
+        return appealService.getAppealsByStatus(com.hutech.nguyenphucthinh.model.Appeal.Status.PENDING).stream().map(a -> {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", a.getId());
+            item.put("username", a.getUser().getUsername());
+            item.put("reason", a.getReason());
+            item.put("createdAt", a.getCreatedAt());
+            return item;
+        }).toList();
+    }
+
+    public Map<String, Object> resolveAppeal(Long appealId, boolean approve) {
+        com.hutech.nguyenphucthinh.model.Appeal a = appealService.resolveAppeal(appealId, approve);
+        return Map.of("message", approve ? "Đã duyệt khiếu nại, mở khóa tài khoản." : "Đã từ chối khiếu nại.", "status", a.getStatus().name());
+    }
+
+    public Map<String, Object> unlockUser(Long userId) {
+        User user = userRepository.findById(userId).orElseThrow();
+        user.setLocked(false);
+        user.setLockedUntil(null);
+        userRepository.save(user);
+        return Map.of("message", "Đã mở khóa tài khoản", "userId", userId);
     }
 
     public List<Map<String, Object>> getReviewsForModeration(String keyword) {

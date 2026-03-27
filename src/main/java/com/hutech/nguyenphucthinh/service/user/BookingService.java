@@ -224,12 +224,31 @@ public class BookingService {
             }
         }
         booking.setStatus(Booking.Status.CANCELLED);
+        booking.setCancelledAt(LocalDateTime.now());
+        Booking saved = bookingRepository.save(booking);
+
+        // Check how many times cancelled in the last 1 month
+        LocalDateTime oneMonthAgo = LocalDateTime.now().minusMonths(1);
+        long cancelCount = bookingRepository.countByCustomerIdAndStatusAndCancelledAtAfter(customerId, Booking.Status.CANCELLED, oneMonthAgo);
+        
+        if (cancelCount >= 3) {
+            User customer = booking.getCustomer();
+            customer.setLocked(true);
+            customer.setLockedUntil(LocalDateTime.now().plusMonths(1));
+            userRepository.save(customer);
+            notificationService.create(
+                    customer.getId(),
+                    "Tài khoản bị khóa tạm thời",
+                    "Bạn đã hủy đơn 3 lần trong vòng 1 tháng qua. Tài khoản của bạn đã bị khóa 1 tháng."
+            );
+        }
+
         notificationService.create(
                 booking.getCustomer().getId(),
                 "Booking đã hủy",
                 "Đơn #" + booking.getId() + " đã được hủy theo chính sách hoàn tiền."
         );
-        return bookingRepository.save(booking);
+        return saved;
     }
 
     private BigDecimal calculateRefundAmount(Booking booking) {

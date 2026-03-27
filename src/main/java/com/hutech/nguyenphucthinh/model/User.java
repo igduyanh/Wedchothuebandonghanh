@@ -46,6 +46,8 @@ public class User {
     @Column(nullable = false)
     private Boolean locked = false;
 
+    private LocalDateTime lockedUntil;
+
     private LocalDateTime createdAt = LocalDateTime.now();
 
     public enum Role {

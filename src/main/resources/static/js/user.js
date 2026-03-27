@@ -1682,7 +1682,14 @@ function initAuthPages() {
                 if (result.warningMessage) setTimeout(go, 1200);
                 else go();
             } else {
-                setMessage("auth-message", "danger", result.message || "Đăng nhập thất bại");
+                let msgHtml = escapeHtml(result.message || "Đăng nhập thất bại");
+                if (result.isLocked) {
+                    msgHtml += ` <div class="mt-2"><button type="button" class="btn btn-sm btn-outline-danger" onclick="openAppealModal('${escapeHtml(payload.username)}', '${escapeHtml(payload.password)}')"><i class="bi bi-shield-lock-fill me-1"></i>Gửi khiếu nại</button></div>`;
+                }
+                const msgBox = document.getElementById("auth-message");
+                if (msgBox) {
+                    msgBox.innerHTML = `<div class="alert alert-danger mb-0">${msgHtml}</div>`;
+                }
             }
         });
     }
@@ -1733,7 +1740,48 @@ function initAuthPages() {
     if (document.getElementById("auth-message")) {
         if (registered === "1") setMessage("auth-message", "success", "Đăng ký thành công, vui lòng đăng nhập.");
     }
+    
+    // Gửi khiếu nại handler
+    const appealForm = document.getElementById("appeal-form");
+    if (appealForm) {
+        appealForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const btn = appealForm.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+            try {
+                const formData = new FormData(appealForm);
+                const payload = Object.fromEntries(formData.entries());
+                const res = await apiFetch("/api/appeal/submit", {
+                    method: "POST",
+                    body: JSON.stringify(payload)
+                });
+                const result = await res.json();
+                if (result.success) {
+                    setMessage("appeal-message", "success", result.message || "Gửi khiếu nại thành công. Vui lòng chờ phản hồi.");
+                    appealForm.reset();
+                } else {
+                    setMessage("appeal-message", "danger", result.message || "Gửi khiếu nại thất bại.");
+                }
+            } catch (err) {
+                setMessage("appeal-message", "danger", "Lỗi kết nối hoặc thực thi.");
+            } finally {
+                if (btn) btn.disabled = false;
+            }
+        });
+    }
 }
+
+window.openAppealModal = function(username, password) {
+    document.getElementById("appeal-username").value = username;
+    document.getElementById("appeal-password").value = password;
+    document.getElementById("appeal-reason").value = "";
+    setMessage("appeal-message", "", "");
+    const modalEl = document.getElementById("appealModal");
+    if (modalEl && window.bootstrap) {
+        const modal = new bootstrap.Modal(modalEl);
+        modal.show();
+    }
+};
 
 async function bootstrap() {
     const page = document.body.dataset.page;

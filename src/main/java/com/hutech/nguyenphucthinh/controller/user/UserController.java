@@ -18,6 +18,8 @@ public class UserController {
     private UserService userService;
     @Autowired
     private CompanionRepository companionRepository;
+    @Autowired
+    private com.hutech.nguyenphucthinh.repository.UserRepository userRepository;
 
     @PostMapping("/register")
     public Map<String, Object> register(@RequestBody Map<String, String> request) {
@@ -47,13 +49,25 @@ public class UserController {
         Optional<User> user = userService.login(username, password);
         Map<String, Object> response = new HashMap<>();
         if (user.isPresent()) {
-            if (Boolean.TRUE.equals(user.get().getLocked())
-                    || User.ModerationFlag.BANNED.equals(user.get().getModerationFlag())) {
+            User u = user.get();
+            if (Boolean.TRUE.equals(u.getLocked())) {
+                if (u.getLockedUntil() != null && u.getLockedUntil().isBefore(java.time.LocalDateTime.now())) {
+                    u.setLocked(false);
+                    u.setLockedUntil(null);
+                    userRepository.save(u);
+                } else {
+                    response.put("success", false);
+                    response.put("isLocked", true);
+                    response.put("message", "Tài khoản của bạn đã bị khóa. Vui lòng gửi khiếu nại nếu cho rằng đây là nhầm lẫn.");
+                    return response;
+                }
+            }
+            if (User.ModerationFlag.BANNED.equals(u.getModerationFlag())) {
                 response.put("success", false);
-                response.put("message", "Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.");
+                response.put("message", "Tài khoản đã bị cấm. Vui lòng liên hệ quản trị viên.");
                 return response;
             }
-            if (User.ModerationFlag.WARNED.equals(user.get().getModerationFlag())) {
+            if (User.ModerationFlag.WARNED.equals(u.getModerationFlag())) {
                 response.put("warning", true);
                 response.put("warningMessage", "Tài khoản của bạn đang ở trạng thái cảnh báo. Vui lòng tuân thủ chính sách để tránh bị khóa.");
             }

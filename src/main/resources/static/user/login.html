@@ -45,6 +45,35 @@
         </div>
     </div>
 </main>
+
+<!-- Appeal Modal -->
+<div class="modal fade" id="appealModal" tabindex="-1" aria-labelledby="appealModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="appealModalLabel"><i class="bi bi-shield-lock-fill text-danger me-2"></i>Gửi khiếu nại mở khóa</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="appeal-message" class="mb-3"></div>
+        <p class="text-muted small">Tài khoản của bạn đã bị khóa tạm thời. Vui lòng gửi lý do để quản trị viên có thể xem xét và mở khóa trước thời hạn.</p>
+        <form id="appeal-form">
+          <input type="hidden" id="appeal-username" name="username">
+          <input type="hidden" id="appeal-password" name="password">
+          <div class="mb-3">
+            <label for="appeal-reason" class="form-label">Lý do khiếu nại <span class="text-danger">*</span></label>
+            <textarea class="form-control" id="appeal-reason" name="reason" rows="4" placeholder="Nhập lý do chi tiết..." required></textarea>
+          </div>
+          <div class="d-grid mt-4">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-send-fill me-2"></i>Gửi khiếu nại cho Admin</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="../js/realtime-stomp.js"></script>
 <script src="../js/user.js"></script>
 </body>

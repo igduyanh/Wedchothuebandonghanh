@@ -58,6 +58,8 @@ public class Booking {
 
     private LocalDateTime completedAt;
 
+    private LocalDateTime cancelledAt;
+
     private Double checkInLatitude;
 
     private Double checkInLongitude;

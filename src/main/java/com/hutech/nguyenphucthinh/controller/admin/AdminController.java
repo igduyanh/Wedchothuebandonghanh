@@ -72,6 +72,24 @@ public class AdminController {
         return adminService.resetUserStatus(id);
     }
 
+    @PutMapping("/users/{id}/unlock")
+    public Map<String, Object> unlockUser(@PathVariable Long id, HttpServletRequest request) {
+        assertAdmin(request);
+        return adminService.unlockUser(id);
+    }
+
+    @GetMapping("/appeals/pending")
+    public List<Map<String, Object>> getPendingAppeals(HttpServletRequest request) {
+        assertAdmin(request);
+        return adminService.getPendingAppeals();
+    }
+
+    @PostMapping("/appeals/{id}/resolve")
+    public Map<String, Object> resolveAppeal(@PathVariable Long id, @RequestBody Map<String, Boolean> payload, HttpServletRequest request) {
+        assertAdmin(request);
+        return adminService.resolveAppeal(id, payload.get("approve"));
+    }
+
     @GetMapping("/moderation/reviews")
     public List<Map<String, Object>> getReviewsForModeration(
             @RequestParam(required = false) String keyword,

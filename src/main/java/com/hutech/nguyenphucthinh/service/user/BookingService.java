@@ -14,9 +14,11 @@ import com.hutech.nguyenphucthinh.repository.UserRepository;
 import com.hutech.nguyenphucthinh.util.GeoDistanceUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 
@@ -80,53 +82,93 @@ public class BookingService {
         return startA.isBefore(endB) && startB.isBefore(endA);
     }
 
-    public Booking createBooking(Long customerId, Long companionId, Long servicePriceId, String bookingTime, Integer duration, String rentalVenue, String location, String note) {
+    /**
+     * Tạo booking với validation nghiêm ngặt và đảm bảo tính nguyên tử (Atomicity).
+     *
+     * Thứ tự xử lý:
+     * 1. Kiểm tra input (null, rentalVenue hợp lệ)
+     * 2. Kiểm tra thời gian (tương lai, không trùng lịch companion)
+     * 3. Kiểm tra trạng thái user (companion online, customer không có booking active)
+     * 4. Giữ tiền (holdForBooking) — chỉ sau khi hold thành công mới lưu booking
+     *
+     * Toàn bộ bước 4 nằm trong @Transactional: nếu lỗi xảy ra ở bất kỳ đâu,
+     * DB sẽ rollback và không có bản ghi "rác" nào được tạo ra.
+     */
+    @Transactional
+    public Booking createBooking(Long customerId, Long companionId, Long servicePriceId,
+                                 String bookingTime, Integer duration,
+                                 String rentalVenue, String location, String note) {
+
+        // ── BƯỚC 1: Input Validation ─────────────────────────────────────────
+        if (companionId == null || servicePriceId == null || bookingTime == null
+                || duration == null || rentalVenue == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "companionId, servicePriceId, bookingTime, duration và rentalVenue là bắt buộc");
+        }
+        if (duration < 30) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Thời lượng tối thiểu là 30 phút");
+        }
+
         User customer = userRepository.findById(customerId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy khách hàng"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Không tìm thấy khách hàng"));
         Companion companion = companionRepository.findById(companionId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy companion"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Không tìm thấy companion"));
         ServicePrice servicePrice = servicePriceRepository.findByIdAndCompanionId(servicePriceId, companionId)
-                .orElseThrow(() -> new RuntimeException("Dịch vụ không hợp lệ hoặc không thuộc companion đã chọn"));
-        if (servicePrice.getPricePerHour() == null || servicePrice.getPricePerHour().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("Giá dịch vụ không hợp lệ");
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Dịch vụ không hợp lệ hoặc không thuộc companion đã chọn"));
+        if (servicePrice.getPricePerHour() == null
+                || servicePrice.getPricePerHour().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Giá dịch vụ không hợp lệ");
         }
-        if (!Boolean.TRUE.equals(companion.getOnlineStatus())) {
-            throw new RuntimeException("Companion đang offline, chưa thể đặt lịch");
+
+        // Kiểm tra rentalVenue hợp lệ theo danh sách của Companion
+        List<String> allowedVenues = parse(companion.getRentalVenues());
+        String chosenVenue = rentalVenue.trim();
+        if (chosenVenue.isEmpty() || !allowedVenues.contains(chosenVenue)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Vui lòng chọn địa điểm thuê hợp lệ từ danh sách companion cung cấp");
         }
-        if (duration == null || duration < 30) {
-            throw new RuntimeException("Thời lượng tối thiểu là 30 phút");
-        }
+
+        // ── BƯỚC 2: Time Validation ──────────────────────────────────────────
         LocalDateTime bookingStart = LocalDateTime.parse(bookingTime);
-        // Không còn chặn đặt lịch trước 2 giờ.
-        // Vẫn chặn các booking rơi vào quá khứ để tránh lỗi nghiệp vụ.
-        if (bookingStart.isBefore(LocalDateTime.now())) {
-            throw new RuntimeException("Bạn phải đặt lịch trong tương lai");
+        if (!bookingStart.isAfter(LocalDateTime.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Thời gian đặt lịch không hợp lệ (phải lớn hơn thời gian hiện tại)");
         }
 
-        boolean customerHasActiveBooking = bookingRepository.findByCustomerIdOrderByBookingTimeDesc(customerId)
-                .stream()
-                .anyMatch(b -> isActiveStatus(b.getStatus()));
-        if (customerHasActiveBooking) {
-            throw new RuntimeException("Bạn đang có đơn chưa hoàn tất. Vui lòng kết thúc hoặc hủy đơn hiện tại trước khi đặt đơn mới");
-        }
-
-        boolean companionBusyInTimeSlot = bookingRepository.findByCompanionIdOrderByBookingTimeDesc(companionId)
+        boolean companionBusyInTimeSlot = bookingRepository
+                .findByCompanionIdOrderByBookingTimeDesc(companionId)
                 .stream()
                 .filter(b -> isActiveStatus(b.getStatus()))
                 .anyMatch(b -> overlaps(bookingStart, duration, b.getBookingTime(), b.getDuration()));
         if (companionBusyInTimeSlot) {
-            throw new RuntimeException("Companion đã có yêu cầu khác trong cùng khung giờ. Vui lòng chọn thời gian khác");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Companion đã có yêu cầu khác trong cùng khung giờ. Vui lòng chọn thời gian khác");
         }
 
-        List<String> allowedVenues = parse(companion.getRentalVenues());
-        if (allowedVenues.isEmpty()) {
-            throw new RuntimeException("Companion chưa cấu hình danh sách nơi thuê trong hồ sơ. Vui lòng chọn companion khác hoặc nhắc companion cập nhật hồ sơ.");
-        }
-        String chosenVenue = rentalVenue == null ? "" : rentalVenue.trim();
-        if (chosenVenue.isEmpty() || !allowedVenues.contains(chosenVenue)) {
-            throw new RuntimeException("Vui lòng chọn một nơi thuê hợp lệ từ danh sách companion cung cấp.");
+        // ── BƯỚC 3: Kiểm tra trạng thái User ────────────────────────────────
+        if (!Boolean.TRUE.equals(companion.getOnlineStatus())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Companion đang offline, chưa thể đặt lịch");
         }
 
+        boolean customerHasActiveBooking = bookingRepository
+                .findByCustomerIdOrderByBookingTimeDesc(customerId)
+                .stream()
+                .anyMatch(b -> isActiveStatus(b.getStatus()));
+        if (customerHasActiveBooking) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Bạn đang có đơn chưa hoàn tất. Vui lòng kết thúc hoặc hủy đơn hiện tại trước khi đặt đơn mới");
+        }
+
+        // ── BƯỚC 4: Tài chính & Lưu dữ liệu (Atomic Transaction) ───────────
+        // Tính holdAmount
+        BigDecimal holdAmount = calculateHoldAmount(servicePrice.getPricePerHour(), duration);
+
+        // Tạo booking object nhưng CHƯA lưu DB
         Booking booking = new Booking();
         booking.setCustomer(customer);
         booking.setCompanion(companion);
@@ -137,11 +179,17 @@ public class BookingService {
         booking.setServiceName(servicePrice.getServiceName());
         booking.setServicePricePerHour(servicePrice.getPricePerHour());
         booking.setNote(note);
-        booking.setHoldAmount(calculateHoldAmount(servicePrice.getPricePerHour(), duration));
+        booking.setHoldAmount(holdAmount);
         booking.setExtensionMinutesApproved(0);
         booking.setStatus(Booking.Status.PENDING);
+
+        // Lưu booking trước để có ID, sau đó hold tiền với booking đã có ID.
+        // Cả hai thao tác đều nằm trong @Transactional — nếu holdForBooking ném exception
+        // (ví dụ: ví không đủ tiền), toàn bộ transaction sẽ rollback, kể cả bookingRepository.save().
         Booking saved = bookingRepository.save(booking);
-        walletService.holdForBooking(customer, saved, saved.getHoldAmount());
+        walletService.holdForBooking(customer, saved, holdAmount);
+
+        // Gửi thông báo cho Companion (chỉ đến đây nếu cả save lẫn hold đều thành công)
         notificationService.create(
                 companion.getUser().getId(),
                 "Có đơn đặt lịch mới",

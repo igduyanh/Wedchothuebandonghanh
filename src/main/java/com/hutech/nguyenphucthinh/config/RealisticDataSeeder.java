@@ -5,6 +5,7 @@ import com.hutech.nguyenphucthinh.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -36,7 +37,7 @@ public class RealisticDataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        // Idempotent: chỉ seed nếu DB mới gần như trống (không có companion APPROVED).
+
         if (!companionRepository.findByStatus(Companion.Status.APPROVED).isEmpty()) {
             return;
         }
@@ -374,7 +375,8 @@ public class RealisticDataSeeder implements CommandLineRunner {
         return userRepository.findByUsername(username).orElseGet(() -> {
             User u = new User();
             u.setUsername(username);
-            u.setPassword(password);
+            BCryptPasswordEncoder encoder = new BCryptPasswordEncoder();
+            u.setPassword(encoder.encode(password == null ? "" : password));
             u.setEmail(email);
             u.setFullName(fullName);
             u.setRole(role);

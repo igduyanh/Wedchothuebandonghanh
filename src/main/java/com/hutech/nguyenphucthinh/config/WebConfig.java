@@ -12,8 +12,20 @@ public class WebConfig implements WebMvcConfigurer {
     @Autowired
     private AdminInterceptor adminInterceptor;
 
+    @Autowired
+    private LockedUserInterceptor lockedUserInterceptor;
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
+        // Nếu tài khoản bị khóa trong lúc vẫn còn session đăng nhập, chặn mọi thao tác API tiếp theo.
+        registry.addInterceptor(lockedUserInterceptor)
+                .addPathPatterns("/api/**")
+                .excludePathPatterns(
+                        "/api/user/login",
+                        "/api/user/register",
+                        "/api/user/logout"
+                );
+
         registry.addInterceptor(adminInterceptor)
                 .addPathPatterns("/admin/**", "/api/admin/**");
     }

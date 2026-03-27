@@ -53,6 +53,10 @@ public class UserController {
                 response.put("message", "Tài khoản đã bị khóa. Vui lòng liên hệ quản trị viên.");
                 return response;
             }
+            if (User.ModerationFlag.WARNED.equals(user.get().getModerationFlag())) {
+                response.put("warning", true);
+                response.put("warningMessage", "Tài khoản của bạn đang ở trạng thái cảnh báo. Vui lòng tuân thủ chính sách để tránh bị khóa.");
+            }
             String effectiveRole = companionRepository.findByUserId(user.get().getId()).isPresent()
                     ? "COMPANION"
                     : user.get().getRole().name();

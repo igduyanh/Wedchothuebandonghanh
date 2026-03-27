@@ -7,7 +7,9 @@ import com.hutech.nguyenphucthinh.util.RequestBodyParseUtil;
 import java.util.Map;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 import java.util.List;
 
 @RestController
@@ -20,7 +22,7 @@ public class BookingController {
     public Booking createBooking(@RequestBody Map<String, Object> request, HttpSession session) {
         Long userId = (Long) session.getAttribute("userId");
         if (userId == null) {
-            throw new RuntimeException("Please login first");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Vui lòng đăng nhập trước");
         }
         Number companionId = (Number) request.get("companionId");
         Number servicePriceId = (Number) request.get("servicePriceId");
@@ -28,9 +30,10 @@ public class BookingController {
         Number duration = (Number) request.get("duration");
         String location = (String) request.getOrDefault("location", "");
         String note = (String) request.getOrDefault("note", "");
-        String rentalVenue = (String) request.getOrDefault("rentalVenue", "");
+        String rentalVenue = (String) request.get("rentalVenue");
         if (companionId == null || servicePriceId == null || bookingTime == null || duration == null) {
-            throw new RuntimeException("companionId, servicePriceId, bookingTime, duration are required");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "companionId, servicePriceId, bookingTime, duration là bắt buộc");
         }
         return bookingService.createBooking(userId, companionId.longValue(), servicePriceId.longValue(), bookingTime, duration.intValue(), rentalVenue, location, note);
     }

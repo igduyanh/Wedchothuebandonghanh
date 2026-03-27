@@ -1,5 +1,26 @@
+const accountWarningState = {
+    last: "",
+    lastAt: 0
+};
+
+function showAccountWarningOnce(message) {
+    const msg = String(message || "").trim();
+    if (!msg) return;
+    const now = Date.now();
+    // Chống spam nếu nhiều request liên tiếp.
+    if (accountWarningState.last === msg && now - accountWarningState.lastAt < 15000) return;
+    accountWarningState.last = msg;
+    accountWarningState.lastAt = now;
+    // Ưu tiên toast (nếu đã có), fallback alert.
+    try {
+        showUserNotificationToast({ title: "Cảnh báo tài khoản", content: msg });
+    } catch (_) {
+        alert(msg);
+    }
+}
+
 async function apiFetch(url, options = {}) {
-    return fetch(url, {
+    const res = await fetch(url, {
         credentials: "same-origin",
         headers: {
             "Content-Type": "application/json",
@@ -7,6 +28,11 @@ async function apiFetch(url, options = {}) {
         },
         ...options
     });
+    try {
+        const warning = res.headers?.get?.("X-Account-Warning");
+        if (warning) showAccountWarningOnce(warning);
+    } catch (_) {}
+    return res;
 }
 
 function escapeHtml(value) {
@@ -343,38 +369,168 @@ async function initProfilePage(auth) {
         const ratingText = hasRating ? `${Number(avg).toFixed(1)} ★ (${reviewCount})` : "Chưa có đánh giá";
 
         box.innerHTML = `
-            <div class="card user-card"><div class="card-body">
-              ${
-                  companion.avatarUrl
-                      ? `<img src="${escapeHtml(companion.avatarUrl)}" alt="avatar" class="img-fluid rounded mb-3" style="max-height:220px;object-fit:cover;">`
-                      : `<div class="d-flex align-items-center justify-content-center rounded mb-3" style="height:220px;background:linear-gradient(135deg,#6366f1,#8b5cf6);">
-                            <i class="bi bi-person-fill text-white" style="font-size:4rem;"></i>
-                         </div>`
-              }
-              <h1 class="h4 mb-1">${escapeHtml(name)}</h1>
-              <div class="mb-3 text-warning fw-bold">${escapeHtml(ratingText)}</div>
-              <p><strong>Bio:</strong> ${escapeHtml(companion.bio || "Chưa có")}</p>
-              <p><strong>Sở thích:</strong> ${escapeHtml(companion.hobbies || "Chưa có")}</p>
-              <p><strong>Ngoại hình:</strong> ${escapeHtml(companion.appearance || "Chưa có")}</p>
-              <p><strong>Thời gian rảnh:</strong> ${escapeHtml(companion.availability || "Chưa có")}</p>
-              <p><strong>Dịch vụ:</strong> ${escapeHtml(companion.serviceType || "-")}</p>
-              <p><strong>Giá (theo dịch vụ):</strong> ${escapeHtml(formatCompanionHourlyPriceRange(companion))}</p>
-              <p><strong>Khu vực:</strong> ${escapeHtml(companion.area || "-")} | <strong>Giới tính:</strong> ${escapeHtml(companion.gender || "-")}</p>
-              ${
-                  parseRentalVenuesLines(companion.rentalVenues).length
-                      ? `<p><strong>Nơi thuê (gợi ý):</strong><br>${parseRentalVenuesLines(companion.rentalVenues).map((v) => `<span class="badge bg-light text-dark border me-1 mb-1">${escapeHtml(v)}</span>`).join("")}</p>`
-                      : `<p class="text-muted small mb-0"><strong>Nơi thuê:</strong> Companion chưa công bố danh sách trong hồ sơ.</p>`
-              }
-              <p><strong>Tỷ lệ phản hồi:</strong> ${Number(companion.responseRate || 0).toFixed(0)}%</p>
-              ${companion.introVideoUrl ? `<a class="btn btn-sm btn-outline-dark mb-3" href="${escapeHtml(companion.introVideoUrl)}" target="_blank">Xem video giới thiệu</a>` : ""}
-              <div class="d-flex gap-2 flex-wrap">
-                <a class="btn btn-primary" href="/user/booking.html?id=${companion.id}">Đặt lịch</a>
-                <a class="btn btn-outline-secondary" href="/user/review.html">Đánh giá</a>
-                <a class="btn btn-outline-warning" href="/user/report.html?reportedUserId=${companion.user?.id || ""}">Tố cáo / SOS</a>
-                ${auth.authenticated ? `<button id="add-favorite-btn" class="btn btn-outline-danger">Thêm yêu thích</button>` : ""}
-              </div>
-              <div id="profile-message" class="mt-3"></div>
-            </div></div>`;
+            <article class="profile-article">
+                <header class="profile-header-section">
+                    <div class="profile-cover-img"></div>
+                    <div class="container">
+                        <div class="profile-header-container">
+                            <div class="profile-avatar-box">
+                                ${
+                                    companion.avatarUrl
+                                        ? `<img src="${escapeHtml(companion.avatarUrl)}" alt="Avatar">`
+                                        : `<div class="profile-avatar-placeholder"><i class="bi bi-person-fill"></i></div>`
+                                }
+                            </div>
+                            <div class="profile-title-area">
+                                <h1 class="profile-name-title">${escapeHtml(name)}</h1>
+                                <div class="mt-2 text-muted fw-bold d-flex flex-wrap align-items-center gap-3 justify-content-center justify-content-lg-start">
+                                    <span class="profile-rating-badge"><i class="bi bi-star-fill"></i> ${escapeHtml(ratingText)}</span>
+                                    ${companion.onlineStatus 
+                                        ? `<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-2 rounded-pill"><i class="bi bi-circle-fill small me-1"></i> Online</span>` 
+                                        : `<span class="badge bg-secondary bg-opacity-10 text-secondary border border-secondary border-opacity-25 px-3 py-2 rounded-pill"><i class="bi bi-circle-fill small me-1"></i> Offline</span>`}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </header>
+
+                <main class="profile-content-section container pb-5">
+                    <div class="row g-4">
+                        <!-- Sidebar: Basic Info & Actions -->
+                        <aside class="col-lg-4">
+                            <section class="profile-info-card">
+                                <div class="card-header-styled">
+                                    <i class="bi bi-info-circle-fill"></i>
+                                    <h5>Thông tin cơ bản</h5>
+                                </div>
+                                <div class="card-body">
+                                    <ul class="sidebar-details-list">
+                                        <li>
+                                            <i class="bi bi-gender-ambiguous text-primary"></i>
+                                            <span class="detail-label">Giới tính:</span>
+                                            <span class="detail-value">${escapeHtml(companion.gender || "-")}</span>
+                                        </li>
+                                        <li>
+                                            <i class="bi bi-geo-alt-fill text-danger"></i>
+                                            <span class="detail-label">Khu vực:</span>
+                                            <span class="detail-value">${escapeHtml(companion.area || "-")}</span>
+                                        </li>
+                                        <li>
+                                            <i class="bi bi-grid-fill text-success"></i>
+                                            <span class="detail-label">Dịch vụ:</span>
+                                            <span class="detail-value">${escapeHtml(companion.serviceType || "-")}</span>
+                                        </li>
+                                        <li>
+                                            <i class="bi bi-cash-stack text-warning"></i>
+                                            <span class="detail-label">Giá (h/h):</span>
+                                            <span class="detail-value text-primary fw-bold">${escapeHtml(formatCompanionHourlyPriceRange(companion))}</span>
+                                        </li>
+                                        <li>
+                                            <i class="bi bi-chat-dots-fill text-info"></i>
+                                            <span class="detail-label">Phản hồi:</span>
+                                            <span class="detail-value">${Number(companion.responseRate || 0).toFixed(0)}%</span>
+                                        </li>
+                                    </ul>
+
+                                    <div class="profile-actions-grid mt-4">
+                                        <a class="btn btn-primary profile-btn-main shadow-sm" href="/user/booking.html?id=${companion.id}">
+                                            <i class="bi bi-calendar-check-fill"></i> Đặt lịch ngay
+                                        </a>
+                                        ${auth.authenticated ? `<button id="add-favorite-btn" class="btn btn-outline-danger profile-btn-main bg-white"><i class="bi bi-heart-fill"></i> Thêm yêu thích</button>` : ""}
+                                    </div>
+                                    
+                                    <div class="d-flex gap-2 mt-3">
+                                        <a class="btn btn-light-action flex-grow-1" href="/user/review.html">
+                                            <i class="bi bi-star me-1"></i> Đánh giá
+                                        </a>
+                                        <a class="btn btn-report-sos flex-grow-1" href="/user/report.html?reportedUserId=${companion.user?.id || ""}">
+                                            <i class="bi bi-exclamation-octagon me-1"></i> Tố cáo/SOS
+                                        </a>
+                                    </div>
+                                    
+                                    <div id="profile-message" class="mt-3 text-center"></div>
+                                </div>
+                            </section>
+                        </aside>
+
+                        <!-- Main Details Content -->
+                        <div class="col-lg-8">
+                            <div class="d-flex flex-column gap-4">
+                                
+                                <!-- Bio -->
+                                <section class="profile-info-card">
+                                    <div class="card-header-styled">
+                                        <i class="bi bi-person-lines-fill text-indigo" style="color: #6366f1;"></i>
+                                        <h5>Giới thiệu bản thân (Bio)</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="bio-text">${escapeHtml(companion.bio || "Chưa có mô tả chi tiết.")}</div>
+                                    </div>
+                                </section>
+
+                                <!-- Traits & Hobbies and Schedule -->
+                                <div class="row g-4">
+                                    <div class="col-md-6 d-flex">
+                                        <section class="profile-info-card w-100">
+                                            <div class="card-header-styled">
+                                                <i class="bi bi-stars text-purple" style="color: #8b5cf6;"></i>
+                                                <h5>Ngoại hình & Thể chất</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <h6 class="fw-bold text-muted mb-1">Ngoại hình</h6>
+                                                    <p class="mb-0 fw-medium">${escapeHtml(companion.appearance || "Chưa có")}</p>
+                                                </div>
+                                                <div>
+                                                    <h6 class="fw-bold text-muted mb-1">Sở thích</h6>
+                                                    <p class="mb-0 fw-medium text-secondary"><i class="bi bi-heart me-1"></i>${escapeHtml(companion.hobbies || "Chưa có")}</p>
+                                                </div>
+                                            </div>
+                                        </section>
+                                    </div>
+                                    <div class="col-md-6 d-flex">
+                                        <section class="profile-info-card w-100">
+                                            <div class="card-header-styled">
+                                                <i class="bi bi-clock-history text-success"></i>
+                                                <h5>Lịch rảnh & Nơi thuê</h5>
+                                            </div>
+                                            <div class="card-body">
+                                                <div class="mb-3">
+                                                    <h6 class="fw-bold text-muted mb-1">Thời gian rảnh</h6>
+                                                    <p class="mb-0 fw-medium"><i class="bi bi-calendar-event me-1"></i>${escapeHtml(companion.availability || "Chưa có")}</p>
+                                                </div>
+                                                <div>
+                                                    <h6 class="fw-bold text-muted mb-1">Nơi thuê (Gợi ý)</h6>
+                                                    ${
+                                                        parseRentalVenuesLines(companion.rentalVenues).length
+                                                            ? `<div class="venues-badges mt-2">${parseRentalVenuesLines(companion.rentalVenues).map((v) => `<span class="badge rounded-pill">${escapeHtml(v)}</span>`).join("")}</div>`
+                                                            : `<p class="text-muted small mb-0 fst-italic">Companion chưa công bố danh sách nơi thuê.</p>`
+                                                    }
+                                                </div>
+                                            </div>
+                                        </section>
+                                    </div>
+                                </div>
+
+                                <!-- Video -->
+                                ${companion.introVideoUrl ? `
+                                <section class="profile-info-card">
+                                    <div class="card-header-styled">
+                                        <i class="bi bi-play-circle-fill text-danger"></i>
+                                        <h5>Video giới thiệu</h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="text-center mb-3">
+                                            <a class="btn btn-outline-dark" href="${escapeHtml(companion.introVideoUrl)}" target="_blank"><i class="bi bi-play-circle-fill me-2"></i>Mở link video giới thiệu</a>
+                                        </div>
+                                    </div>
+                                </section>
+                                ` : ""}
+                            </div>
+                        </div>
+                    </div>
+                </main>
+            </article>`;
 
         const addBtn = document.getElementById("add-favorite-btn");
         if (addBtn) {
@@ -638,9 +794,22 @@ async function initBookingPage(auth) {
 async function initAppointmentsPage(auth) {
     if (!requireLogin(auth)) return;
     const box = document.getElementById("appointment-list");
-    const res = await apiFetch("/api/bookings/me", { headers: {} });
-    const bookings = res.ok ? await res.json() : [];
-    box.innerHTML = bookings.length ? bookings.map((b) => {
+    if (!box) return;
+
+    const appointmentsState = (window.__userAppointmentsState ||= {
+        initialized: false,
+        timer: null,
+        isRefreshing: false,
+        lastPayloadKey: ""
+    });
+
+    async function fetchMyBookings() {
+        const res = await apiFetch("/api/bookings/me", { headers: {} });
+        return res.ok ? res.json() : [];
+    }
+
+    function renderBookings(bookings) {
+        box.innerHTML = bookings.length ? bookings.map((b) => {
         const extMax = 120;
         const extApproved = Number(b.extensionMinutesApproved || 0);
         const extRemaining = extMax - extApproved;
@@ -672,70 +841,121 @@ async function initAppointmentsPage(auth) {
           ${(b.status === "ACCEPTED" || b.status === "IN_PROGRESS") ? `<a class="btn btn-danger btn-sm" href="/user/report.html?reportedUserId=${b.companion?.user?.id || ""}&bookingId=${b.id}&emergency=1"><i class="bi bi-exclamation-octagon me-1"></i>SOS</a>` : ""}
         </div>
       </div></div>`;
-    }).join("") : `<div class="empty-state">Bạn chưa có lịch hẹn nào.</div>`;
+        }).join("") : `<div class="empty-state">Bạn chưa có lịch hẹn nào.</div>`;
+    }
 
-    box.querySelectorAll(".booking-action").forEach((btn) => {
-        btn.addEventListener("click", async () => {
+    async function refreshAppointments({ silent } = { silent: false }) {
+        if (appointmentsState.isRefreshing) return;
+        appointmentsState.isRefreshing = true;
+        try {
+            const bookings = await fetchMyBookings();
+            // Tránh re-render liên tục nếu payload không đổi.
+            const payloadKey = JSON.stringify(
+                (Array.isArray(bookings) ? bookings : []).map((b) => ({
+                    id: b?.id,
+                    status: b?.status,
+                    pendingExtensionMinutes: b?.pendingExtensionMinutes,
+                    extensionMinutesApproved: b?.extensionMinutesApproved,
+                    duration: b?.duration,
+                    holdAmount: b?.holdAmount,
+                    bookingTime: b?.bookingTime,
+                    checkInLatitude: b?.checkInLatitude,
+                    checkOutLatitude: b?.checkOutLatitude
+                }))
+            );
+            if (payloadKey !== appointmentsState.lastPayloadKey) {
+                appointmentsState.lastPayloadKey = payloadKey;
+                renderBookings(bookings);
+            } else if (!silent) {
+                // Nếu user vừa bấm thao tác, vẫn render lại để đồng bộ nút/trạng thái.
+                renderBookings(bookings);
+            }
+        } finally {
+            appointmentsState.isRefreshing = false;
+        }
+    }
+
+    if (!appointmentsState.initialized) {
+        appointmentsState.initialized = true;
+        box.addEventListener("click", async (ev) => {
+            const btn = ev.target?.closest?.(".booking-action");
+            if (!btn) return;
             const id = btn.getAttribute("data-id");
             const action = btn.getAttribute("data-action");
+            if (!id || !action) return;
+
+            btn.disabled = true;
             let res;
-            if (action === "check-in") {
-                try {
+            try {
+                if (action === "check-in") {
                     const pos = await getReporterGps();
                     if (pos.lat == null || pos.lng == null) {
-                        alert(
-                            "Không lấy được GPS. Bật định vị, cho phép trình duyệt; cần HTTPS hoặc localhost (xem hướng dẫn trang Tố cáo)."
-                        );
+                        alert("Không lấy được GPS. Bật định vị, cho phép trình duyệt; cần HTTPS hoặc localhost (xem hướng dẫn trang Tố cáo).");
                         return;
                     }
                     res = await apiFetch(`/api/bookings/me/${id}/check-in`, {
                         method: "PATCH",
-                        body: JSON.stringify({ lat: pos.lat, lng: pos.lng }),
+                        body: JSON.stringify({ lat: pos.lat, lng: pos.lng })
                     });
-                } catch (e) {
-                    alert(e?.message || "Lỗi khi lấy GPS.");
-                    return;
-                }
-            } else if (action === "check-out") {
-                try {
+                } else if (action === "check-out") {
                     const pos = await getReporterGps();
                     if (pos.lat == null || pos.lng == null) {
-                        alert(
-                            "Không lấy được GPS. Bật định vị, cho phép trình duyệt; cần HTTPS hoặc localhost (xem hướng dẫn trang Tố cáo)."
-                        );
+                        alert("Không lấy được GPS. Bật định vị, cho phép trình duyệt; cần HTTPS hoặc localhost (xem hướng dẫn trang Tố cáo).");
                         return;
                     }
                     res = await apiFetch(`/api/bookings/me/${id}/check-out`, {
                         method: "PATCH",
-                        body: JSON.stringify({ lat: pos.lat, lng: pos.lng }),
+                        body: JSON.stringify({ lat: pos.lat, lng: pos.lng })
                     });
-                } catch (e) {
-                    alert(e?.message || "Lỗi khi lấy GPS.");
+                } else if (action === "extend") {
+                    res = await apiFetch(`/api/bookings/me/${id}/extension-request`, {
+                        method: "POST",
+                        body: JSON.stringify({ extraMinutes: 30 })
+                    });
+                } else if (action === "extension-cancel") {
+                    res = await apiFetch(`/api/bookings/me/${id}/extension-request/cancel`, { method: "POST", headers: {} });
+                } else {
+                    res = await apiFetch(`/api/bookings/me/${id}/${action}`, { method: "PATCH", headers: {} });
+                }
+
+                if (!res.ok) {
+                    const text = await res.text();
+                    let msg = text || "Thao tác thất bại";
+                    try {
+                        const j = JSON.parse(text);
+                        if (j.message) msg = j.message;
+                    } catch (_) {}
+                    alert(msg);
                     return;
                 }
-            } else if (action === "extend") {
-                res = await apiFetch(`/api/bookings/me/${id}/extension-request`, {
-                    method: "POST",
-                    body: JSON.stringify({ extraMinutes: 30 }),
-                });
-            } else if (action === "extension-cancel") {
-                res = await apiFetch(`/api/bookings/me/${id}/extension-request/cancel`, { method: "POST", headers: {} });
-            } else {
-                res = await apiFetch(`/api/bookings/me/${id}/${action}`, { method: "PATCH", headers: {} });
-            }
-            if (!res.ok) {
-                const text = await res.text();
-                let msg = text || "Thao tác thất bại";
-                try {
-                    const j = JSON.parse(text);
-                    if (j.message) msg = j.message;
-                } catch (_) {}
-                alert(msg);
+            } catch (e) {
+                alert(e?.message || "Thao tác thất bại");
                 return;
+            } finally {
+                btn.disabled = false;
             }
-            await initAppointmentsPage(auth);
+
+            await refreshAppointments({ silent: false });
         });
-    });
+    }
+
+    // Load lần đầu
+    await refreshAppointments({ silent: false });
+
+    // Auto-refresh để user thấy trạng thái đổi khi companion check-in/out.
+    if (!appointmentsState.timer) {
+        appointmentsState.timer = setInterval(() => {
+            const stillOnAppointments = document.body?.dataset?.page === "appointments";
+            if (!stillOnAppointments) return;
+            refreshAppointments({ silent: true }).catch(() => {});
+        }, 4000);
+        window.addEventListener("beforeunload", () => {
+            try {
+                clearInterval(appointmentsState.timer);
+            } catch (_) {}
+            appointmentsState.timer = null;
+        });
+    }
 }
 
 async function initFavoritesPage(auth) {
@@ -758,9 +978,10 @@ async function initFavoritesPage(auth) {
         btn.addEventListener("click", async () => {
             const id = btn.getAttribute("data-id");
             const del = await apiFetch(`/api/favorites/${id}`, { method: "DELETE", headers: {} });
-            if (del.ok) {
-                await initFavoritesPage(auth);
-            }
+            if (del.ok) return initFavoritesPage(auth);
+
+            const msg = await parseApiErrorMessage(del, "Xóa khỏi yêu thích thất bại");
+            alert(msg);
         });
     });
 }
@@ -1153,9 +1374,12 @@ async function initChatPage(auth) {
         if (myBookingsRes.ok) {
             results.push(...normalizeThreads(await myBookingsRes.json()));
         }
-        const companionBookingsRes = await apiFetch("/api/companions/me/bookings", { headers: {} });
-        if (companionBookingsRes.ok) {
-            results.push(...normalizeThreads(await companionBookingsRes.json()));
+        // Tránh “lẫn booking” với các view của companion khi user chỉ là CUSTOMER.
+        if (auth?.role === "COMPANION") {
+            const companionBookingsRes = await apiFetch("/api/companions/me/bookings", { headers: {} });
+            if (companionBookingsRes.ok) {
+                results.push(...normalizeThreads(await companionBookingsRes.json()));
+            }
         }
         const uniq = new Map();
         results.forEach((item) => {
@@ -1446,9 +1670,17 @@ function initAuthPages() {
             });
             const result = await res.json();
             if (result.success) {
-                if (result.role === "ADMIN") window.location.href = "/admin/dashboard.html";
-                else if (result.role === "COMPANION") window.location.href = "/companion/dashboard.html";
-                else window.location.href = "/user/index.html";
+                if (result.warningMessage) {
+                    setMessage("auth-message", "warning", result.warningMessage);
+                }
+                const go = () => {
+                    if (result.role === "ADMIN") window.location.href = "/admin/dashboard.html";
+                    else if (result.role === "COMPANION") window.location.href = "/companion/dashboard.html";
+                    else window.location.href = "/user/index.html";
+                };
+                // Nếu có cảnh báo thì cho user thấy 1 nhịp rồi mới chuyển trang.
+                if (result.warningMessage) setTimeout(go, 1200);
+                else go();
             } else {
                 setMessage("auth-message", "danger", result.message || "Đăng nhập thất bại");
             }
@@ -1472,6 +1704,28 @@ function initAuthPages() {
                 setMessage("auth-message", "danger", result.message || "Đăng ký thất bại");
             }
         });
+    }
+
+    // Toggle hiển thị mật khẩu (login/register).
+    // - Input: id="password"
+    // - Nút: id="toggle-password-visibility"
+    // - Icon: id="toggle-password-icon"
+    const pwInput = document.getElementById("password");
+    const toggleBtn = document.getElementById("toggle-password-visibility");
+    const toggleIcon = document.getElementById("toggle-password-icon");
+    if (pwInput && toggleBtn && toggleIcon) {
+        const syncIcon = () => {
+            const isVisible = pwInput.type === "text";
+            toggleIcon.classList.toggle("bi-eye", !isVisible);
+            toggleIcon.classList.toggle("bi-eye-slash", isVisible);
+            toggleBtn.setAttribute("aria-pressed", String(isVisible));
+        };
+        toggleBtn.addEventListener("click", () => {
+            const isVisible = pwInput.type === "text";
+            pwInput.type = isVisible ? "password" : "text";
+            syncIcon();
+        });
+        syncIcon();
     }
 
     const params = new URLSearchParams(window.location.search);

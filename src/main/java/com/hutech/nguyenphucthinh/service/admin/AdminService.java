@@ -13,6 +13,7 @@ import com.hutech.nguyenphucthinh.repository.ReportRepository;
 import com.hutech.nguyenphucthinh.repository.TransactionRepository;
 import com.hutech.nguyenphucthinh.repository.UserRepository;
 import com.hutech.nguyenphucthinh.repository.WithdrawalRepository;
+import com.hutech.nguyenphucthinh.service.user.NotificationService;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -44,6 +45,9 @@ public class AdminService {
     private BookingRepository bookingRepository;
     @PersistenceContext
     private EntityManager entityManager;
+
+    @Autowired
+    private NotificationService notificationService;
 
     private volatile BigDecimal commissionRate = new BigDecimal("0.15");
     private final Set<Long> hiddenReviewIds = ConcurrentHashMap.newKeySet();
@@ -140,6 +144,15 @@ public class AdminService {
         User user = userRepository.findById(userId).orElseThrow();
         user.setModerationFlag(User.ModerationFlag.WARNED);
         userRepository.save(user);
+        try {
+            notificationService.create(
+                    userId,
+                    "Cảnh báo tài khoản",
+                    "Tài khoản của bạn đã bị cảnh báo do vi phạm/quy tắc cộng đồng. Vui lòng tuân thủ chính sách để tránh bị khóa."
+            );
+        } catch (Exception ignored) {
+            // Không chặn nghiệp vụ cảnh cáo nếu notification lỗi.
+        }
         return Map.of("message", "Đã cảnh cáo người dùng", "userId", userId, "flag", "WARNED");
     }
 
@@ -195,11 +208,15 @@ public class AdminService {
     public Map<String, Object> getTransactionManagementData(String keyword) {
         List<Map<String, Object>> withdrawals = new ArrayList<>();
         for (Withdrawal withdrawal : withdrawalRepository.findByStatusOrderByCreatedAtDesc(Withdrawal.Status.PENDING)) {
+            BigDecimal rate = normalizeCommissionRate(commissionRate);
+            BigDecimal computedCommission = computeCommissionAmount(withdrawal.getAmount(), rate);
+            BigDecimal computedNet = computeNetAmount(withdrawal.getAmount(), computedCommission);
             Map<String, Object> item = new HashMap<>();
             item.put("id", withdrawal.getId());
             item.put("amount", withdrawal.getAmount());
-            item.put("commissionAmount", withdrawal.getCommissionAmount());
-            item.put("netAmount", withdrawal.getNetAmount());
+            // Pending dùng tỷ lệ hiện tại để admin thấy tác động tức thì khi đổi commission rate.
+            item.put("commissionAmount", computedCommission);
+            item.put("netAmount", computedNet);
             item.put("createdAt", withdrawal.getCreatedAt());
             item.put("status", withdrawal.getStatus());
             item.put("bankName", withdrawal.getBankName());
@@ -250,9 +267,21 @@ public class AdminService {
         if (withdrawal.getStatus() != Withdrawal.Status.PENDING) {
             throw new RuntimeException("Chỉ duyệt được lệnh rút tiền đang chờ");
         }
+        BigDecimal rate = normalizeCommissionRate(commissionRate);
+        BigDecimal commission = computeCommissionAmount(withdrawal.getAmount(), rate);
+        BigDecimal net = computeNetAmount(withdrawal.getAmount(), commission);
+        withdrawal.setCommissionAmount(commission);
+        withdrawal.setNetAmount(net);
         withdrawal.setStatus(Withdrawal.Status.APPROVED);
         withdrawalRepository.save(withdrawal);
-        return Map.of("message", "Đã duyệt lệnh rút tiền", "withdrawalId", withdrawalId, "status", withdrawal.getStatus());
+        return Map.of(
+                "message", "Đã duyệt lệnh rút tiền",
+                "withdrawalId", withdrawalId,
+                "status", withdrawal.getStatus(),
+                "commissionRate", rate,
+                "commissionAmount", commission,
+                "netAmount", net
+        );
     }
 
     public Map<String, Object> rejectWithdrawal(Long withdrawalId) {
@@ -274,18 +303,55 @@ public class AdminService {
             item.put("reporter", report.getReporter() == null ? "" : report.getReporter().getUsername());
             item.put("reportedUser", report.getReportedUser() == null ? "" : report.getReportedUser().getUsername());
             item.put("reason", report.getReason());
-            item.put("status", report.getStatus());
+            String lastAction = disputeActions.getOrDefault(report.getId(), "NONE");
+            String status = "ESCROW_FROZEN".equals(lastAction) ? "ESCROW_FROZEN" : report.getStatus().name();
+            item.put("status", status);
             item.put("createdAt", report.getCreatedAt());
-            item.put("lastAction", disputeActions.getOrDefault(report.getId(), "NONE"));
+            item.put("lastAction", lastAction);
             response.add(item);
         }
         return response;
     }
 
     public Map<String, Object> freezeEscrow(Long reportId) {
-        validateReportExists(reportId);
+        Report report = validateReportExists(reportId);
+        // Model hiện tại chỉ lưu được PENDING/RESOLVED, nên để ESCROW_FROZEN hiển thị bằng status/action ở lớp API.
+        report.setStatus(Report.Status.RESOLVED);
+        reportRepository.save(report);
         disputeActions.put(reportId, "ESCROW_FROZEN");
-        return Map.of("message", "Đã đóng băng tiền cọc", "reportId", reportId, "action", "ESCROW_FROZEN");
+
+        // Chưa hoàn tiền: thông báo cho reporter/reportedUser rằng quỹ đã bị đóng băng.
+        notifyDisputeNoRefund(
+                report,
+                "Tranh chấp: đã đóng băng ký quỹ",
+                String.format(
+                        "Quản trị viên đã đóng băng ký quỹ cho tranh chấp #%d. Hệ thống chưa thực hiện hoàn tiền trong trạng thái này.",
+                        reportId
+                ),
+                "ESCROW_FROZEN",
+                report.getReporter() != null ? report.getReporter().getId() : null
+        );
+        notifyDisputeNoRefund(
+                report,
+                "Tranh chấp: trạng thái đã cập nhật",
+                String.format(
+                        "Tranh chấp #%d đã được đóng băng ký quỹ. (Hệ thống chưa hoàn tiền).",
+                        reportId
+                ),
+                "ESCROW_FROZEN",
+                report.getReportedUser() != null ? report.getReportedUser().getId() : null
+        );
+
+        return Map.of(
+                "message",
+                "Đã đóng băng tiền cọc",
+                "reportId",
+                reportId,
+                "action",
+                "ESCROW_FROZEN",
+                "status",
+                "ESCROW_FROZEN"
+        );
     }
 
     public Map<String, Object> refundToUser(Long reportId) {
@@ -293,7 +359,16 @@ public class AdminService {
         report.setStatus(Report.Status.RESOLVED);
         reportRepository.save(report);
         disputeActions.put(reportId, "REFUND_TO_USER");
-        return Map.of("message", "Đã hoàn tiền cho người dùng", "reportId", reportId, "action", "REFUND_TO_USER");
+        return Map.of(
+                "message",
+                "Đã hoàn tiền cho người dùng",
+                "reportId",
+                reportId,
+                "action",
+                "REFUND_TO_USER",
+                "status",
+                "RESOLVED"
+        );
     }
 
     public Map<String, Object> payoutToCompanion(Long reportId) {
@@ -301,7 +376,40 @@ public class AdminService {
         report.setStatus(Report.Status.RESOLVED);
         reportRepository.save(report);
         disputeActions.put(reportId, "PAYOUT_TO_COMPANION");
-        return Map.of("message", "Đã trả tiền cho companion", "reportId", reportId, "action", "PAYOUT_TO_COMPANION");
+
+        // Không hoàn tiền: thông báo cho người báo cáo (reporter) và người bị báo cáo (reportedUser).
+        notifyDisputeNoRefund(
+                report,
+                "Tranh chấp đã được xử lý",
+                String.format(
+                        "Quản trị viên đã quyết định %s, vì vậy yêu cầu hoàn tiền của bạn không được thực hiện (Tranh chấp #%d).",
+                        "thanh toán cho companion",
+                        reportId
+                ),
+                "PAYOUT_TO_COMPANION",
+                report.getReporter() != null ? report.getReporter().getId() : null
+        );
+        notifyDisputeNoRefund(
+                report,
+                "Tranh chấp đã cập nhật",
+                String.format(
+                        "Tranh chấp #%d đã được xử lý và quyết định thanh toán cho companion. (Không hoàn tiền).",
+                        reportId
+                ),
+                "PAYOUT_TO_COMPANION",
+                report.getReportedUser() != null ? report.getReportedUser().getId() : null
+        );
+
+        return Map.of(
+                "message",
+                "Đã trả tiền cho companion",
+                "reportId",
+                reportId,
+                "action",
+                "PAYOUT_TO_COMPANION",
+                "status",
+                "RESOLVED"
+        );
     }
 
     public Map<String, Object> closeDispute(Long reportId) {
@@ -309,7 +417,60 @@ public class AdminService {
         report.setStatus(Report.Status.RESOLVED);
         reportRepository.save(report);
         disputeActions.put(reportId, "CLOSED");
-        return Map.of("message", "Đã đóng tranh chấp", "reportId", reportId, "action", "CLOSED");
+
+        // Không hoàn tiền: thông báo cho reporter (và reportedUser).
+        notifyDisputeNoRefund(
+                report,
+                "Tranh chấp đã đóng",
+                String.format(
+                        "Quản trị viên đã đóng tranh chấp #%d. Hệ thống không thực hiện hoàn tiền trong trường hợp này.",
+                        reportId
+                ),
+                "CLOSED",
+                report.getReporter() != null ? report.getReporter().getId() : null
+        );
+        notifyDisputeNoRefund(
+                report,
+                "Tranh chấp đã cập nhật",
+                String.format(
+                        "Tranh chấp #%d đã đóng. Hệ thống không thực hiện hoàn tiền. ",
+                        reportId
+                ),
+                "CLOSED",
+                report.getReportedUser() != null ? report.getReportedUser().getId() : null
+        );
+
+        return Map.of(
+                "message",
+                "Đã đóng tranh chấp",
+                "reportId",
+                reportId,
+                "action",
+                "CLOSED",
+                "status",
+                "RESOLVED"
+        );
+    }
+
+    private void notifyDisputeNoRefund(
+            Report report,
+            String title,
+            String content,
+            String action,
+            Long targetUserId
+    ) {
+        if (targetUserId == null) {
+            return;
+        }
+        try {
+            // content đã được truyền vào; action chỉ dùng để tăng tính rõ ràng.
+            String finalContent = content == null
+                    ? String.format("Tranh chấp #%d đã được cập nhật: %s.", report.getId(), action)
+                    : content;
+            notificationService.create(targetUserId, title, finalContent);
+        } catch (Exception e) {
+            // Nếu notification lỗi, vẫn không chặn nghiệp vụ xử lý tranh chấp.
+        }
     }
 
     /** Đơn đang diễn ra / đã chấp nhận — admin theo dõi GPS & check-in. */
@@ -394,6 +555,35 @@ public class AdminService {
 
     private static boolean isBlankKeyword(String keyword) {
         return keyword == null || keyword.trim().isEmpty();
+    }
+
+    private BigDecimal normalizeCommissionRate(BigDecimal rate) {
+        if (rate == null || rate.compareTo(BigDecimal.ZERO) < 0) {
+            return BigDecimal.ZERO;
+        }
+        if (rate.compareTo(BigDecimal.ONE) > 0) {
+            return BigDecimal.ONE;
+        }
+        return rate;
+    }
+
+    private BigDecimal computeCommissionAmount(BigDecimal grossAmount, BigDecimal rate) {
+        BigDecimal safeGross = grossAmount == null ? BigDecimal.ZERO : grossAmount;
+        BigDecimal commission = safeGross.multiply(rate).setScale(0, RoundingMode.HALF_UP);
+        if (commission.compareTo(safeGross) > 0) {
+            commission = safeGross;
+        }
+        if (commission.signum() < 0) {
+            commission = BigDecimal.ZERO;
+        }
+        return commission;
+    }
+
+    private BigDecimal computeNetAmount(BigDecimal grossAmount, BigDecimal commission) {
+        BigDecimal safeGross = grossAmount == null ? BigDecimal.ZERO : grossAmount;
+        BigDecimal safeCommission = commission == null ? BigDecimal.ZERO : commission;
+        BigDecimal net = safeGross.subtract(safeCommission);
+        return net.signum() < 0 ? BigDecimal.ZERO : net;
     }
 
     private static String normalizeKeyword(String keyword) {

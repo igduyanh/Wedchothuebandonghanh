@@ -4,6 +4,7 @@ import com.hutech.nguyenphucthinh.model.User;
 import com.hutech.nguyenphucthinh.repository.UserRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.util.Optional;
 
@@ -11,6 +12,8 @@ import java.util.Optional;
 public class UserService {
     @Autowired
     private UserRepository userRepository;
+
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     public User register(User user) {
         String username = normalize(user.getUsername());
@@ -38,7 +41,7 @@ public class UserService {
 
         user.setUsername(username);
         user.setEmail(email);
-        user.setPassword(password);
+        user.setPassword(passwordEncoder.encode(password));
 
         if (userRepository.findByUsername(user.getUsername()).isPresent()) {
             throw new RuntimeException("Tên đăng nhập đã tồn tại");
@@ -55,8 +58,29 @@ public class UserService {
         if (normalizedUsername.isBlank() || normalizedPassword.isBlank()) {
             return Optional.empty();
         }
-        return userRepository.findByUsername(normalizedUsername)
-                .filter(user -> user.getPassword().equals(normalizedPassword));
+        Optional<User> found = userRepository.findByUsername(normalizedUsername);
+        if (found.isEmpty()) return Optional.empty();
+
+        User user = found.get();
+        String stored = user.getPassword() == null ? "" : user.getPassword();
+
+        // Hỗ trợ cả dữ liệu cũ (plain) và dữ liệu mới (BCrypt). Nếu login thành công bằng plain thì nâng cấp lên BCrypt.
+        boolean ok;
+        if (isBcryptHash(stored)) {
+            ok = passwordEncoder.matches(normalizedPassword, stored);
+        } else {
+            ok = stored.equals(normalizedPassword);
+            if (ok) {
+                user.setPassword(passwordEncoder.encode(normalizedPassword));
+                userRepository.save(user);
+            }
+        }
+        return ok ? Optional.of(user) : Optional.empty();
+    }
+
+    private boolean isBcryptHash(String value) {
+        // BCrypt format: $2a$ / $2b$ / $2y$
+        return value != null && value.startsWith("$2");
     }
 
     private String normalize(String value) {

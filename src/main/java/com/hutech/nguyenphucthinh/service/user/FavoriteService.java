@@ -8,6 +8,7 @@ import com.hutech.nguyenphucthinh.repository.UserRepository;
 import com.hutech.nguyenphucthinh.repository.CompanionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 
 @Service
@@ -20,7 +21,7 @@ public class FavoriteService {
     private FavoriteRepository favoriteRepository;
 
     public void addToFavorites(Long customerId, Long companionId) {
-        if (favoriteRepository.existsByCustomerIdAndCompanionId(customerId, companionId)) {
+        if (favoriteRepository.existsByCustomer_IdAndCompanion_Id(customerId, companionId)) {
             return;
         }
 
@@ -36,10 +37,11 @@ public class FavoriteService {
     }
 
     public List<Favorite> getFavoritesByCustomer(Long customerId) {
-        return favoriteRepository.findByCustomerId(customerId);
+        return favoriteRepository.findByCustomer_Id(customerId);
     }
 
+    @Transactional
     public void removeFavorite(Long customerId, Long companionId) {
-        favoriteRepository.deleteByCustomerIdAndCompanionId(customerId, companionId);
+        favoriteRepository.deleteByCustomer_IdAndCompanion_Id(customerId, companionId);
     }
 }
